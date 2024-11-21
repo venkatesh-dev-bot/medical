@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import streamlit as st
 from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI
@@ -7,12 +9,11 @@ from dotenv import load_dotenv
 import streamlit.components.v1 as components
 import logging
 import time
-import json
-from pathlib import Path
+from langchain.callbacks.base import BaseCallbackHandler
 
 # Set page config first, before any other Streamlit commands
 st.set_page_config(
-    page_title="Vector Math Calculator",
+    page_title="Pediatric Medical Assistant",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -63,22 +64,29 @@ def delete_prompt(name):
 
 # Initialize session states
 if 'custom_prompt' not in st.session_state:
-    st.session_state.custom_prompt = """You are a specialized vector mathematics calculator. Follow these rules strictly:
-1. Use only plain text in your responses
-2. Write vectors as: 2i + 3j + 4k
-3. Show calculations in simple arithmetic form
-4. Express all numbers as decimals
-5. No LaTeX or special mathematical notation
+    st.session_state.custom_prompt = """You are a professional pediatric medical expert. Follow these guidelines strictly:
 
-Question: {input}
+1. IMPORTANT: Always preface responses with appropriate medical disclaimers
+2. Verify symptoms and conditions carefully before responding
+3. Use clear, parent-friendly language while maintaining medical accuracy
+4. Provide evidence-based information with current medical guidelines
+5. Include red flags or warning signs when relevant
+6. Recommend when immediate medical attention is needed
+7. Explain preventive care and healthy practices
+8. NEVER provide specific medication dosages
+9. Always encourage consultation with a healthcare provider
 
-Follow this format for your answer:
-STEP 1: [First calculation step]
-STEP 2: [Second calculation step]
-STEP 3: [Third calculation step]
-FINAL ANSWER: [Result in simplest form]
+Medical Query: {input}
 
-Begin solution:
+Response Format:
+DISCLAIMER: [Appropriate medical disclaimer]
+ASSESSMENT: [Initial evaluation of the query]
+EXPLANATION: [Detailed medical information]
+RECOMMENDATIONS: [General guidance and next steps]
+IMPORTANT NOTES: [Key points and warnings]
+WHEN TO SEEK IMMEDIATE CARE: [Emergency indicators]
+
+Begin response:
 """
 
 if 'default_prompt' not in st.session_state:
@@ -171,12 +179,29 @@ math_prompt = PromptTemplate(
     input_variables=["input"]
 )
 
-# Create chain
-gpt4_chain = LLMChain(llm=gpt4, prompt=math_prompt, verbose=True)
+# Add StreamHandler class
+class StreamHandler(BaseCallbackHandler):
+    def __init__(self, container: st.delta_generator.DeltaGenerator, initial_text: str = ""):
+        self.container = container
+        self.text = initial_text
+        self.run_id_ignore_token = None
+        self.full_response = ""
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        self.full_response += token
+        self.container.markdown(self.full_response)
 
 # Main content
-st.title("🔢 Vector Mathematics Calculator")
-st.markdown("---")
+st.title("🏥 Pediatric Medical Assistant")
+st.markdown("""
+---
+⚕️ **IMPORTANT MEDICAL DISCLAIMER**
+- This is an AI assistant providing general medical information
+- Not a replacement for professional medical advice
+- Always consult with qualified healthcare providers
+- Seek immediate medical attention for emergencies
+---
+""")
 
 # Chat interface
 for message in st.session_state.messages:
@@ -186,36 +211,83 @@ for message in st.session_state.messages:
 # User input
 question = st.chat_input("Enter your vector mathematics question...")
 
-if question:
-    # Show user message
-    with st.chat_message("user"):
-        st.write(question)
-    st.session_state.messages.append({"role": "user", "content": question})
+# Add medical validation function
+def validate_medical_query(query: str) -> tuple[bool, str]:
+    """Validate medical queries for safety and appropriateness"""
+    # List of keywords indicating emergency situations
+    emergency_keywords = [
+        "unconscious", "breathing", "choking", "seizure", "bleeding",
+        "head injury", "poison", "overdose", "suicide", "abuse"
+    ]
     
-    # Show thinking message
-    with st.chat_message("assistant"):
-        thinking_placeholder = st.empty()
-        thinking_placeholder.text("🤔 Thinking...")
+    # Check for emergency situations
+    for keyword in emergency_keywords:
+        if keyword in query.lower():
+            return False, "⚠️ EMERGENCY DETECTED: Please call emergency services (911) immediately!"
+    
+    return True, ""
+
+# Update the chat interface with medical validation
+if question:
+    # Validate the medical query first
+    is_safe, warning_message = validate_medical_query(question)
+    
+    if not is_safe:
+        with st.chat_message("assistant"):
+            st.error(warning_message)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": warning_message
+            })
+    else:
+        # Show user message
+        with st.chat_message("user"):
+            st.write(question)
+        st.session_state.messages.append({"role": "user", "content": question})
         
-        try:
-            result = gpt4_chain.invoke({"input": question})
-            response_text = result['text']
+        # Show thinking message with medical context
+        with st.chat_message("assistant"):
+            answer_container = st.empty()
+            thinking_placeholder = answer_container.text("🩺 Analyzing medical query...")
+            stream_handler = StreamHandler(answer_container)
             
-            thinking_placeholder.empty()
-            st.write(response_text)
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response_text
-            })
+            try:
+                # Initialize streaming LLM with medical context
+                llm = ChatOpenAI(
+                    model="gpt-4o-mini",
+                    temperature=0.2,  # Lower temperature for more conservative medical advice
+                    streaming=True,
+                    callbacks=[stream_handler],
+                    verbose=True
+                )
                 
-        except Exception as e:
-            thinking_placeholder.empty()
-            error_msg = f"❌ Error: {str(e)}"
-            st.error(error_msg)
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": error_msg
-            })
+                # Update chain with streaming LLM
+                medical_chain = LLMChain(
+                    llm=llm, 
+                    prompt=math_prompt, 
+                    verbose=True
+                )
+                
+                # Clear thinking message
+                thinking_placeholder.empty()
+                
+                # Get streaming response
+                result = medical_chain.invoke({"input": question})
+                
+                # Store in chat history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": stream_handler.full_response
+                })
+                    
+            except Exception as e:
+                thinking_placeholder.empty()
+                error_msg = f"❌ Error: Unable to process medical query. Please try again or consult a healthcare provider."
+                st.error(error_msg)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": error_msg
+                })
 
 # Add custom CSS
 st.markdown("""
@@ -237,6 +309,38 @@ st.markdown("""
         padding: 10px;
         background-color: #f0f2f6;
         border-radius: 10px;
+    }
+    .medical-disclaimer {
+        background-color: #fff3cd;
+        border-left: 5px solid #ffc107;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .emergency-warning {
+        background-color: #f8d7da;
+        border-left: 5px solid #dc3545;
+        padding: 1rem;
+        margin: 1rem 0;
+        font-weight: bold;
+    }
+    .medical-recommendation {
+        background-color: #d4edda;
+        border-left: 5px solid #28a745;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .chat-message {
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        line-height: 1.6;
+    }
+    .medical-reference {
+        font-size: 0.8em;
+        color: #666;
+        margin-top: 10px;
+        border-top: 1px solid #eee;
+        padding-top: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
