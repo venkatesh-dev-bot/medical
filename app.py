@@ -64,29 +64,24 @@ def delete_prompt(name):
 
 # Initialize session states
 if 'custom_prompt' not in st.session_state:
-    st.session_state.custom_prompt = """You are a professional pediatric medical expert. Follow these guidelines strictly:
+    st.session_state.custom_prompt = """You are an experienced pediatric physician with extensive clinical experience. Respond as if you're directly consulting with a patient in your office. Focus on:
 
-1. IMPORTANT: Always preface responses with appropriate medical disclaimers
-2. Verify symptoms and conditions carefully before responding
-3. Use clear, parent-friendly language while maintaining medical accuracy
-4. Provide evidence-based information with current medical guidelines
-5. Include red flags or warning signs when relevant
-6. Recommend when immediate medical attention is needed
-7. Explain preventive care and healthy practices
-8. NEVER provide specific medication dosages
-9. Always encourage consultation with a healthcare provider
+1. Direct, clear medical assessment
+2. Evidence-based clinical recommendations
+3. Specific treatment guidelines when appropriate
+4. Clear emergency indicators
+5. Professional medical terminology with plain language explanations
+6. Precise dosing calculations when relevant (based on standard medical protocols)
+7. Clinical reasoning and differential diagnosis
 
-Medical Query: {input}
+Query: {input}
 
-Response Format:
-DISCLAIMER: [Appropriate medical disclaimer]
-ASSESSMENT: [Initial evaluation of the query]
-EXPLANATION: [Detailed medical information]
-RECOMMENDATIONS: [General guidance and next steps]
-IMPORTANT NOTES: [Key points and warnings]
-WHEN TO SEEK IMMEDIATE CARE: [Emergency indicators]
-
-Begin response:
+Respond in a direct, clinical manner:
+[Clinical Assessment]
+[Diagnosis/Differential]
+[Treatment Plan]
+[Follow-up Recommendations]
+[Emergency Indicators]
 """
 
 if 'default_prompt' not in st.session_state:
@@ -174,7 +169,7 @@ with st.sidebar:
         st.rerun()
 
 # Update prompt template with custom prompt
-math_prompt = PromptTemplate(
+medical_prompt = PromptTemplate(
     template=st.session_state.custom_prompt,
     input_variables=["input"]
 )
@@ -255,17 +250,16 @@ if question:
                 # Initialize streaming LLM with medical context
                 llm = ChatOpenAI(
                     model="gpt-4o-mini",
-                    temperature=0.2,  # Lower temperature for more conservative medical advice
+                    temperature=0,  # Lower temperature for more precise medical responses
                     streaming=True,
                     callbacks=[stream_handler],
-                    verbose=True
+                    seed=42
                 )
                 
                 # Update chain with streaming LLM
                 medical_chain = LLMChain(
                     llm=llm, 
-                    prompt=math_prompt, 
-                    verbose=True
+                    prompt=medical_prompt
                 )
                 
                 # Clear thinking message
